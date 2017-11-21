@@ -419,7 +419,8 @@ class Transform2d(object):
 
         return X
 
-    def inverse_channels(self, pyramid, data_format, gain_mask=None):
+    def inverse_channels(self, pyramid, data_format, gain_mask=None,
+                         lp_gain=None, sum_channels=False):
         """
         Perform an inverse transform on an image with multiple channels.
 
@@ -453,8 +454,17 @@ class Transform2d(object):
                 * "nhwc" - the input is a batch of images with channel dimension
                   as the last dimension. Batch dimension is first.
 
-        :param gain_mask: Gain to be applied to each subband. Should have shape
-            [6, nlevels].
+        :param gain_mask: Gain to be applied to each subband. Can have shape
+            [6, nlevels] (will apply the same gain mask to all the channels), or
+            [c, 6, nlevels] to apply different gain masks to the channels. Can
+            be numpy constants, or tensorflow variables. If you want to apply a
+            gain to the lowpass outputs, use lp_gain.
+        :param lp_gain: Gain to be applied to each lowpass channel. Can be a
+            constant or have shape [c,]. If the latter, then will apply
+            different lowpass gains to different channels.
+        :param bool sum_channels: Whether to sum the channels before taking the
+            inverse dtcwt. If True, will sum the channels, using the gain mask
+            provided (or ones if the gain mask is not provided).
 
         :returns: An array , X, compatible with the reconstruction. Will be a tf
             Variable if the Pyramid was made with tf inputs, otherwise a numpy
@@ -486,7 +496,6 @@ class Transform2d(object):
             Yl = pyramid.lowpass_op
             Yh = pyramid.highpasses_ops
             numpy = pyramid.numpy
-
         # Check if a numpy pyramid was provided
         elif isinstance(pyramid, Pyramid_np) or \
                 hasattr(pyramid, 'lowpass') and hasattr(pyramid, 'highpasses'):
@@ -509,12 +518,17 @@ class Transform2d(object):
                 str(Yl_shape) + ' for the specified data_format ' +
                 data_format + '.')
 
+        # Apply gains
+        Yl, Yh, data_format = self._apply_gains(
+            Yl, Yh, lp_gain, gain_mask, data_format, sum_channels)
+
         # Reshape the inputs to all be 3d inputs of shape (batch, h, w)
         if data_format in formats_4d:
             if data_format == "nhwc":
                 channel_ax = 3
             else:
                 channel_ax = 1
+
             # Move all of the channels into the batch dimension for the lowpass
             # input. This may involve transposing, depending on the data format
             with tf.variable_scope('ch_to_batch'):
@@ -530,10 +544,11 @@ class Transform2d(object):
                     Yl = tf.reshape(Yl, [-1, s[2], s[3]])
 
                 # Move all of the channels into the batch dimension for the
-                # highpass input. This may involve transposing, depending on the
-                # data format
+                # highpass inputs. This may involve transposing, depending on
+                # the data format
                 Yh_new = []
                 for scale in Yh:
+
                     s = scale.get_shape().as_list()
                     if s[channel_ax] != num_channels:
                         raise ValueError(
@@ -557,15 +572,23 @@ class Transform2d(object):
                     tf.transpose(x, [2, 0, 1, 3], name='Yh{}'.format(i))
                     for i,x in enumerate(Yh))
 
-        else:
+        elif data_format == "nhw" or data_format == "chw":
             s = Yl.get_shape().as_list()
             size = '{}x{}'.format(s[1], s[2])
             num_channels = s[0]
 
+        # can be possible if we summed over the channels
+        elif data_format == "hw":
+            s = Yl.get_shape().as_list()
+            size = '{}x{}'.format(s[0], s[1])
+            num_channels = 1
+            Yl = tf.expand_dims(Yl, axis=0)
+            Yh = tuple(tf.expand_dims(x, axis=0) for x in Yh)
+
         # Do the inverse dtcwt, now with the same shape input
         name = 'dtcwt_inv_{}_{}channels'.format(size, num_channels)
         with tf.variable_scope(name):
-            X = self._inverse_ops(Yl, Yh, gain_mask)
+            X = self._inverse_ops(Yl, Yh)
 
         # Reshape the output to match the input shape.
         if data_format in formats_4d:
@@ -574,10 +597,13 @@ class Transform2d(object):
                 X = tf.reshape(X, [-1, num_channels, s[1], s[2]])
                 if data_format == "nhwc":
                     X = tf.transpose(X, [0, 2, 3, 1], name='X')
-        else:
+        elif data_format in formats_3d:
             if data_format == "hwn" or data_format == "hwc":
                 with tf.variable_scope('ch_to_end'):
                     X = tf.transpose(X, [1, 2, 0], name="X")
+        elif data_format == "hw":
+            # Chop off the batch dimension
+            X = X[0]
 
         # If the user expects numpy back, evaluate the data.
         if numpy:
@@ -586,6 +612,129 @@ class Transform2d(object):
                 X = sess.run(X)
 
         return X
+
+    def _apply_gains(self, Yl, Yh, lp_gain, gain_mask, data_format,
+                     sum_channels):
+        """ Applies gains to the channels of each level of Yh using the
+        gain_mask provided and sums if necessary.
+
+        :param Yl: The lowpass outputs
+        :param Yh: The highpass outputs. Although the data formats are 4 or 3
+            dimensions, the highpass outputs will be a list of arrays of each 5
+            or 4 dimensions. The extra dimension is from the 6 orientations of
+            the DTCWT, and this is always the last dimension.
+        :param lp_gain: Lowpass gain. Can be a scalar or of shape [c,].
+        :param gain_mask: gain masks to apply to each of the orientations and
+            levels of the highpasses. Can have shape [c, 6, nlevels] or
+            [6, nlevels] (the latter meaning the same gain is applied to each
+            channel).
+        :param str data_format: String indicating what axes represent what
+            property. Should be "nhwc", "nchw", "nhw", "chw", "hwn" or "hwc".
+        :param bool sum_channels: If true, will sum up the channels
+
+        :returns tuple (Yl_new, Yh_new, data_format): Gain applied to Yl, Yh and
+            the new data_format (if summing was performed).
+        """
+        if gain_mask is None and lp_gain is None and not sum_channels:
+            return Yl, Yh, data_format
+
+        #####
+        # If the gain mask is None, set it to all ones
+        if gain_mask is None:
+            gain_mask = tf.constant(np.ones((1, 6, len(Yh))))
+
+        # Gain mask can be numpy numbers or tf. If numpy, copy to tf.
+        if not (isinstance(gain_mask, tf.Tensor) or
+                isinstance(gain_mask, tf.Variable)):
+            gain_mask = tf.constant(gain_mask)
+
+        # Gain mask can be 2 dimensional even if we want to sum over the
+        # channels. In which case, assume each channel has the same gain.
+        if len(gain_mask.get_shape()) == 2:
+            gain_mask = tf.expand_dims(gain_mask, axis=0)
+
+        # make gain_mask have shape [nlevels, c, 6] (or [nlevels, 1, 6]
+        gain_mask = tf.transpose(gain_mask, perm=[2, 0, 1])
+
+        #####
+        # Do the same checks for the lowpass gain. It will have shape [c] or [1]
+        if lp_gain is None:
+            lp_gain = tf.constant([1])
+        if not (isinstance(lp_gain, tf.Tensor) or
+                isinstance(lp_gain, tf.Variable)):
+            lp_gain = tf.constant(lp_gain)
+        if len(lp_gain.get_shape()) == 0:
+            lp_gain = tf.expand_dims(lp_gain, axis=0)
+
+        #####
+        # Apply gains
+        Yh_new = [None,] * len(Yh)
+        if data_format == "nhwc":
+            # Each Yh has shape [n, h, w, c, 6]. The gain mask will have shape
+            # [nlevels, c, 6] or [nlevels, 1, 6]. Want to multiply and sum.
+            # Can rely on broadcasting to help us here.
+            for i, level in enumerate(Yh):
+                Yh_new[i] = level * gain_mask[i]
+                if sum_channels:
+                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=3)
+
+            # Apply gains to the low pass
+            Yl_new = Yl * lp_gain
+            if sum_channels:
+                Yl_new = tf.reduce_sum(Yl_new, axis=3)
+                data_format = "nhw"
+
+        elif data_format == "nchw":
+            # Each Yh has shape [n, c, h, w, 6]. The gain mask will have shape
+            # [nlevels, c, 6] or [nlevels, 1, 6].
+            gain_mask = tf.expand_dims(
+                tf.expand_dims(gain_mask, axis=2), axis=3)
+            for i, level in enumerate(Yh):
+                Yh_new[i] = level * gain_mask[i]
+                if sum_channels:
+                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=1)
+
+            # Apply gains to the low pass
+            lp_gain = tf.expand_dims(
+                tf.expand_dims(lp_gain, axis=-1), axis=-1)
+            Yl_new = Yl * lp_gain
+            if sum_channels:
+                Yl_new = tf.reduce_sum(Yl_new, axis=1)
+                data_format = "nhw"
+
+        elif data_format == "nhw" or data_format == "chw":
+            # Each Yh has shape [c, h, w, 6]. The gain mask will have shape
+            # [nlevels, c, 6] or [nlevels, 1, 6].
+            gain_mask = tf.expand_dims(
+                tf.expand_dims(gain_mask, axis=2), axis=3)
+            for i, level in enumerate(Yh):
+                Yh_new[i] = level * gain_mask[i]
+                if sum_channels:
+                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=0)
+
+            # Apply gains to the low pass
+            lp_gain = tf.expand_dims(
+                tf.expand_dims(lp_gain, axis=-1), axis=-1)
+            Yl_new = Yl * lp_gain
+            if sum_channels:
+                Yl_new = tf.reduce_sum(Yl_new, axis=0)
+                data_format = "hw"
+
+        elif data_format == "hwn" or data_format == "hwc":
+            # Each Yh has shape [h, w, c, 6]. The gain mask will have shape
+            # [nlevels, c, 6] or [nlevels, 1, 6].
+            for i, level in enumerate(Yh):
+                Yh_new[i] = level * gain_mask[i]
+                if sum_channels:
+                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=2)
+
+            # Apply gains to the low pass
+            Yl_new = Yl * lp_gain
+            if sum_channels:
+                Yl_new = tf.reduce_sum(Yl_new, axis=-1)
+                data_format = "hw"
+
+        return Yl_new, Yh_new, data_format
 
     def _forward_ops(self, X, nlevels=3):
         """ Perform a *n*-level DTCWT-2D decompostion on a 2D matrix *X*.
