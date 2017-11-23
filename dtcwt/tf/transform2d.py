@@ -668,6 +668,8 @@ class Transform2d(object):
 
         #####
         # Apply gains
+        gain_mask = tf.cast(gain_mask, tf.complex64)
+        lp_gain = tf.cast(lp_gain, tf.float32)
         Yh_new = [None,] * len(Yh)
         if data_format == "nhwc":
             # Each Yh has shape [n, h, w, c, 6]. The gain mask will have shape
