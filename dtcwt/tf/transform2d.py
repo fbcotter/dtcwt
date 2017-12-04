@@ -14,6 +14,8 @@ from dtcwt.numpy import Pyramid as Pyramid_np
 
 from dtcwt.tf.lowlevel import coldfilt, rowdfilt, rowfilter, colfilter, colifilt
 
+_GAIN_FUNC = 'einsum'
+
 try:
     import tensorflow as tf
     from tensorflow.python.framework import dtypes
@@ -669,69 +671,48 @@ class Transform2d(object):
             gain_mask = tf.cast(gain_mask, tf.complex64)
             lp_gain = tf.cast(lp_gain, tf.float32)
             Yh_new = [None,] * len(Yh)
-            if data_format == "nhwc":
-                # Each Yh has shape [n, h, w, c, 6]. The gain mask will have
-                # shape [nlevels, f, c, 6]. Want to multiply and sum and the
-                # output to have shape [n, h, w, f, 6].  Can rely on
-                # broadcasting to help us here.
+            if _GAIN_FUNC == 'einsum':
+                new_fmt = data_format.replace('c','f')
+                bp_einsum = '{}l,fcl->{}l'.format(data_format, new_fmt)
+                lp_einsum = '{},fc->{}'.format(data_format, new_fmt)
                 for i, level in enumerate(Yh):
-                    # This gives us an output of [n, h, w, 6, f, 6]
-                    Yh_new[i] = tf.tensordot(level, gain_mask[i], axes=[[3], [1]])
-                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=-2)
+                    Yh_new[i] = tf.einsum(bp_einsum, level, gain_mask[i])
+                Yl_new = tf.einsum(lp_einsum, Yl, lp_gain)
 
-                # Apply gains to the low pass
-                Yl = tf.expand_dims(Yl, axis=-2)
-                Yl_new = Yl * lp_gain
-                Yl_new = tf.reduce_sum(Yl_new, axis=-2)
+            # The old broadcasting method
+            else:
+                if data_format == "nhwc":
+                    # Each Yh has shape [n, h, w, c, 6]. The gain mask will have
+                    # shape [nlevels, f, c, 6]. Want to multiply and sum and the
+                    # output to have shape [n, h, w, f, 6].  Can rely on
+                    # broadcasting to help us here.
+                    for i, level in enumerate(Yh):
+                        level = tf.expand_dims(level, axis=-2)
+                        Yh_new[i] = level * gain_mask[i]
+                        Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=-2)
 
-            elif data_format == "nchw":
-                # Each Yh has shape [n, c, h, w, 6]. The gain mask will have
-                # shape [nlevels, f, c, 6]
-                gain_mask = tf.expand_dims(
-                    tf.expand_dims(gain_mask, axis=3), axis=4)
-                for i, level in enumerate(Yh):
-                    level = tf.expand_dims(level, axis=1)
-                    Yh_new[i] = level * gain_mask[i]
-                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=2)
+                    # Apply gains to the low pass
+                    Yl = tf.expand_dims(Yl, axis=-2)
+                    Yl_new = Yl * lp_gain
+                    Yl_new = tf.reduce_sum(Yl_new, axis=-2)
 
-                # Apply gains to the low pass
-                lp_gain = tf.expand_dims(
-                    tf.expand_dims(lp_gain, axis=-1), axis=-1)
-                Yl = tf.expand_dims(Yl, axis=1)
-                Yl_new = Yl * lp_gain
-                Yl_new = tf.reduce_sum(Yl_new, axis=2)
+                elif data_format == "nchw":
+                    # Each Yh has shape [n, c, h, w, 6]. The gain mask will have
+                    # shape [nlevels, f, c, 6]
+                    gain_mask = tf.expand_dims(
+                        tf.expand_dims(gain_mask, axis=3), axis=4)
+                    for i, level in enumerate(Yh):
+                        level = tf.expand_dims(level, axis=1)
+                        Yh_new[i] = level * gain_mask[i]
+                        Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=2)
+
+                    # Apply gains to the low pass
+                    lp_gain = tf.expand_dims(
+                        tf.expand_dims(lp_gain, axis=-1), axis=-1)
+                    Yl = tf.expand_dims(Yl, axis=1)
+                    Yl_new = Yl * lp_gain
+                    Yl_new = tf.reduce_sum(Yl_new, axis=2)
             """
-            if data_format == "nhwc":
-                # Each Yh has shape [n, h, w, c, 6]. The gain mask will have
-                # shape [nlevels, f, c, 6]. Want to multiply and sum and the
-                # output to have shape [n, h, w, f, 6].  Can rely on
-                # broadcasting to help us here.
-                for i, level in enumerate(Yh):
-                    level = tf.expand_dims(level, axis=-2)
-                    Yh_new[i] = level * gain_mask[i]
-                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=-2)
-
-                # Apply gains to the low pass
-                Yl = tf.expand_dims(Yl, axis=-2)
-                Yl_new = Yl * lp_gain
-                Yl_new = tf.reduce_sum(Yl_new, axis=-2)
-
-            elif data_format == "nchw":
-                # Each Yh has shape [n, c, h, w, 6]. The gain mask will have
-                # shape [nlevels, f, c, 6]
-                gain_mask = tf.expand_dims(
-                    tf.expand_dims(gain_mask, axis=3), axis=4)
-                for i, level in enumerate(Yh):
-                    level = tf.expand_dims(level, axis=1)
-                    Yh_new[i] = level * gain_mask[i]
-                    Yh_new[i] = tf.reduce_sum(Yh_new[i], axis=2)
-
-                # Apply gains to the low pass
-                lp_gain = tf.expand_dims(
-                    tf.expand_dims(lp_gain, axis=-1), axis=-1)
-                Yl = tf.expand_dims(Yl, axis=1)
-                Yl_new = Yl * lp_gain
-                Yl_new = tf.reduce_sum(Yl_new, axis=2)
             """
 
             #  elif data_format == "nhw" or data_format == "chw":
