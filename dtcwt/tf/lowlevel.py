@@ -28,6 +28,20 @@ def _as_col_tensor(h):
     return h
 
 
+def complex_stack(values, axis=0, name='stack'):
+    """ Function to allow gpu placement of stacking of complex variables.
+
+    Annoyingly tensorflow doesn't have an op yet to stack complex variables on a
+    gpu. This should be straight forward to implement with the real and
+    imaginary parts, so we use a wrapper to do that here.
+    """
+    r = [tf.real(v) for v in values]
+    i = [tf.imag(v) for v in values]
+    r = tf.stack(r, axis, name)
+    i = tf.stack(i, axis, name)
+    return tf.complex(r, i)
+
+
 def _conv_2d(X, h, strides=[1,1,1,1]):
     """
     Perform 2d convolution in tensorflow.
