@@ -894,26 +894,26 @@ class Transform2d(object):
         # Uses the biorthogonal filters
         if nlevels >= 1:
             # Do odd top-level filters on cols.
-            Lo = colfilter(X, h0o)
-            Hi = colfilter(X, h1o)
+            Lo = colfilter(X, h0o, name='l0_col_low')
+            Hi = colfilter(X, h1o, name='l0_col_high')
             if len(self.biort) >= 6:
                 Ba = colfilter(X, h2o)
 
             # Do odd top-level filters on rows.
-            LoLo = rowfilter(Lo, h0o)
+            LoLo = rowfilter(Lo, h0o, name='l0_LoLo')
             LoLo_shape = LoLo.get_shape().as_list()[1:]
 
             # Horizontal wavelet pair (15 & 165 degrees)
-            horiz = q2c(rowfilter(Hi, h0o))
+            horiz = q2c(rowfilter(Hi, h0o, name='l0_LoHi'))
 
             # Vertical wavelet pair (75 & 105 degrees)
-            vertic = q2c(rowfilter(Lo, h1o))
+            vertic = q2c(rowfilter(Lo, h1o, name='l0_HiLo'))
 
             # Diagonal wavelet pair (45 & 135 degrees)
             if len(self.biort) >= 6:
-                diag = q2c(rowfilter(Ba, h2o))
+                diag = q2c(rowfilter(Ba, h2o, name='l0_HiHi'))
             else:
-                diag = q2c(rowfilter(Hi, h1o))
+                diag = q2c(rowfilter(Hi, h1o, name='l0_HiHi'))
 
             # Pack all 6 tensors into one
             Yh[0] = complex_stack(
@@ -937,26 +937,26 @@ class Transform2d(object):
                 LoLo = tf.pad(LoLo, [[0, 0], [0, 0], [1, 1]], 'SYMMETRIC')
 
             # Do even Qshift filters on cols.
-            Lo = coldfilt(LoLo, h0b, h0a)
-            Hi = coldfilt(LoLo, h1b, h1a)
+            Lo = coldfilt(LoLo, h0b, h0a, name='l%d_col_low' % level)
+            Hi = coldfilt(LoLo, h1b, h1a, name='l%d_col_hi' % level)
             if len(self.qshift) >= 12:
                 Ba = coldfilt(LoLo, h2b, h2a)
 
             # Do even Qshift filters on rows.
-            LoLo = rowdfilt(Lo, h0b, h0a)
+            LoLo = rowdfilt(Lo, h0b, h0a, name='l%d_LoLo' % level)
             LoLo_shape = LoLo.get_shape().as_list()[1:3]
 
             # Horizontal wavelet pair (15 & 165 degrees)
-            horiz = q2c(rowdfilt(Hi, h0b, h0a))
+            horiz = q2c(rowdfilt(Hi, h0b, h0a, name='l%d_LoHi' % level))
 
             # Vertical wavelet pair (75 & 105 degrees)
-            vertic = q2c(rowdfilt(Lo, h1b, h1a))
+            vertic = q2c(rowdfilt(Lo, h1b, h1a, name='l%d_HiLo' % level))
 
             # Diagonal wavelet pair (45 & 135 degrees)
             if len(self.qshift) >= 12:
-                diag = q2c(rowdfilt(Ba, h2b, h2a))
+                diag = q2c(rowdfilt(Ba, h2b, h2a, name='l%d_HiHi' % level))
             else:
-                diag = q2c(rowdfilt(Hi, h1b, h1a))
+                diag = q2c(rowdfilt(Hi, h1b, h1a, name='l%d_HiHi' % level))
 
             # Pack all 6 tensors into one
             Yh[level] = complex_stack(
@@ -1043,51 +1043,47 @@ class Transform2d(object):
         else:
             raise ValueError('Qshift wavelet must have 12 or 8 components.')
 
-        current_level = a
+        level = a - 1
         Z = Yl
 
         # This ensures that for level 1 we never do the following
-        while current_level >= 2:
-            lh = c2q(Yh[current_level - 1][:, :, :, 0:6:5],
-                     gain_mask[[0, 5],
-                     current_level - 1])
-            hl = c2q(Yh[current_level - 1][:, :, :, 2:4:1],
-                     gain_mask[[2, 3],
-                     current_level - 1])
-            hh = c2q(Yh[current_level - 1][:, :, :, 1:5:3],
-                     gain_mask[[1, 4],
-                     current_level - 1])
+        while level >= 1:
+            lh = c2q(Yh[level][:,:,:,0:6:5], gain_mask[[0, 5], level])
+            hl = c2q(Yh[level][:,:,:,2:4:1], gain_mask[[2, 3], level])
+            hh = c2q(Yh[level][:,:,:,1:5:3], gain_mask[[1, 4], level])
 
             # Do even Qshift filters on columns.
-            y1 = colifilt(Z, g0b, g0a) + colifilt(lh, g1b, g1a)
+            y1 = colifilt(Z, g0b, g0a, name='l%d_ll_col_low' % level) + \
+                colifilt(lh, g1b, g1a, name='l%d_lh_col_high' % level)
 
             if len(self.qshift) >= 12:
-                y2 = colifilt(hl, g0b, g0a)
-                y2bp = colifilt(hh, g2b, g2a)
+                y2 = colifilt(hl, g0b, g0a, name='l%d_hl_col_low' % level)
+                y2bp = colifilt(hh, g2b, g2a, name='l%d_hh_col_bp' % level)
 
                 # Do even Qshift filters on rows.
                 y1T = tf.transpose(y1, perm=[0, 2, 1])
                 y2T = tf.transpose(y2, perm=[0, 2, 1])
                 y2bpT = tf.transpose(y2bp, perm=[0, 2, 1])
                 Z = tf.transpose(
-                    colifilt(y1T, g0b, g0a) +
-                    colifilt(y2T, g1b, g1a) +
-                    colifilt(y2bpT, g2b, g2a),
+                    colifilt(y1T, g0b, g0a, name='l%d_ll_row_low' % level) +
+                    colifilt(y2T, g1b, g1a, name='l%d_hl_row_high' % level) +
+                    colifilt(y2bpT, g2b, g2a, name='l%d_hh_row_bp' % level),
                     perm=[0, 2, 1])
             else:
-                y2 = colifilt(hl, g0b, g0a) + colifilt(hh, g1b, g1a)
+                y2 = colifilt(hl, g0b, g0a, name='l%d_hl_col_low' % level) + \
+                    colifilt(hh, g1b, g1a, name='l%d_hh_col_high' % level)
 
                 # Do even Qshift filters on rows.
                 y1T = tf.transpose(y1, perm=[0, 2, 1])
                 y2T = tf.transpose(y2, perm=[0, 2, 1])
                 Z = tf.transpose(
-                    colifilt(y1T, g0b, g0a) +
-                    colifilt(y2T, g1b, g1a),
+                    colifilt(y1T, g0b, g0a, name='l%d_ll_row_low' % level) +
+                    colifilt(y2T, g1b, g1a, name='l%d_hl_row_high' % level),
                     perm=[0, 2, 1])
 
             # Check size of Z and crop as required
             Z_r, Z_c = Z.get_shape().as_list()[1:3]
-            S_r, S_c = Yh[current_level - 2].get_shape().as_list()[1:3]
+            S_r, S_c = Yh[level-1].get_shape().as_list()[1:3]
             # check to see if this result needs to be cropped for the rows
             if Z_r != S_r * 2:
                 Z = Z[:, 1:-1, :]
@@ -1102,34 +1098,32 @@ class Transform2d(object):
                     'Sizes of highpasses {}x{} are not '.format(Z_r, Z_c) +
                     'compatible with {}x{} from next level'.format(S_r, S_c))
 
-            current_level = current_level - 1
+            level = level - 1
 
-        if current_level == 1:
-            lh = c2q(Yh[current_level - 1][:, :, :, 0:6:5],
-                     gain_mask[[0, 5],
-                     current_level - 1])
-            hl = c2q(Yh[current_level - 1][:, :, :, 2:4:1],
-                     gain_mask[[2, 3],
-                     current_level - 1])
-            hh = c2q(Yh[current_level - 1][:, :, :, 1:5:3],
-                     gain_mask[[1, 4],
-                     current_level - 1])
+        if level == 0:
+            lh = c2q(Yh[level][:,:,:,0:6:5], gain_mask[[0, 5], level])
+            hl = c2q(Yh[level][:,:,:,2:4:1], gain_mask[[2, 3], level])
+            hh = c2q(Yh[level][:,:,:,1:5:3], gain_mask[[1, 4], level])
 
             # Do odd top-level filters on columns.
-            y1 = colfilter(Z, g0o) + colfilter(lh, g1o)
+            y1 = colfilter(Z, g0o, name='l0_ll_col_low') + \
+                colfilter(lh, g1o, name='l0_lh_col_high')
 
             if len(self.biort) >= 6:
-                y2 = colfilter(hl, g0o)
-                y2bp = colfilter(hh, g2o)
+                y2 = colfilter(hl, g0o, name='l0_hl_col_low')
+                y2bp = colfilter(hh, g2o, name='l0_hh_col_bp')
 
                 # Do odd top-level filters on rows.
-                Z = rowfilter(y1, g0o) + rowfilter(y2, g1o) + \
-                    rowfilter(y2bp, g2o)
+                Z = rowfilter(y1, g0o, name='l0_ll_row_low') + \
+                    rowfilter(y2, g1o, name='l0_hl_row_high') + \
+                    rowfilter(y2bp, g2o, name='l0_hh_row_bp')
             else:
-                y2 = colfilter(hl, g0o) + colfilter(hh, g1o)
+                y2 = colfilter(hl, g0o, name='l0_hl_col_low') + \
+                    colfilter(hh, g1o, name='l0_hh_col_high')
 
                 # Do odd top-level filters on rows.
-                Z = rowfilter(y1, g0o) + rowfilter(y2, g1o)
+                Z = rowfilter(y1, g0o, name='l0_ll_row_low') + \
+                    rowfilter(y2, g1o, name='l0_hl_row_high')
 
         return Z
 

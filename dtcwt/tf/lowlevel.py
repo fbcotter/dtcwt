@@ -42,7 +42,7 @@ def complex_stack(values, axis=0, name='stack'):
     return tf.complex(r, i)
 
 
-def _conv_2d(X, h, strides=[1,1,1,1]):
+def _conv_2d(X, h, strides=[1,1,1,1], name=None):
     """
     Perform 2d convolution in tensorflow.
 
@@ -68,7 +68,7 @@ def _conv_2d(X, h, strides=[1,1,1,1]):
 
     # Have to reverse h as tensorflow 2d conv is actually cross-correlation
     h = tf.reverse(h, axis=[0,1])
-    Y = tf.nn.conv2d(X, h, strides=strides, padding='VALID')
+    Y = tf.nn.conv2d(X, h, strides=strides, padding='VALID', name=name)
 
     # Remove the final dimension, returning a result of shape
     # [batch, height, width]
@@ -142,14 +142,15 @@ def _tf_pad(x, szs, padding='SYMMETRIC'):
     return x
 
 
-def colfilter(X, h, align=False):
+def colfilter(X, h, align=False, name=None):
     """
     Filter the columns of image *X* using filter vector *h*, without decimation.
 
     :param X: an image whose columns are to be filtered
     :param h: the filter coefficients.
-    :param align: If true, then will have Y keep the same output shape as X,
-        even if h has even length. Makes no difference if len(h) is odd.
+    :param bool align: If true, then will have Y keep the same output shape as
+        X, even if h has even length. Makes no difference if len(h) is odd.
+    :param str name: The name for the conv operation
 
     :returns Y: the filtered image.
 
@@ -175,19 +176,20 @@ def colfilter(X, h, align=False):
     else:
         X = _tf_pad(X, [[0, 0], [m2, m2], [0, 0]], 'SYMMETRIC')
 
-    Y = _conv_2d(X, h_t, strides=[1,1,1,1])
+    Y = _conv_2d(X, h_t, strides=[1,1,1,1], name=name)
 
     return Y
 
 
-def rowfilter(X, h, align=False):
+def rowfilter(X, h, align=False, name=None):
     """
     Filter the rows of image *X* using filter vector *h*, without decimation.
 
     :param X: a tensor of images whose rows are to be filtered
     :param h: the filter coefficients.
-    :param align: If true, then will have Y keep the same output shape as X,
-        even if h has even length. Makes no difference if len(h) is odd.
+    :param bool align: If true, then will have Y keep the same output shape as
+        X, even if h has even length. Makes no difference if len(h) is odd.
+    :param str name: The name for the conv operation
 
     :returns Y: the filtered image.
 
@@ -213,12 +215,12 @@ def rowfilter(X, h, align=False):
     else:
         X = _tf_pad(X, [[0, 0], [0, 0], [m2, m2]], 'SYMMETRIC')
 
-    Y = _conv_2d(X, h_t, strides=[1,1,1,1])
+    Y = _conv_2d(X, h_t, strides=[1,1,1,1], name=name)
 
     return Y
 
 
-def coldfilt(X, ha, hb, no_decimate=False):
+def coldfilt(X, ha, hb, name=None):
     """
     Filter the columns of image X using the two filters ha and hb =
     reverse(ha).
@@ -226,7 +228,7 @@ def coldfilt(X, ha, hb, no_decimate=False):
     :param X: The input, of size [batch, h, w]
     :param ha: Filter to be used on the odd samples of x.
     :param hb: Filter to bue used on the even samples of x.
-    :param no_decimate: If true, keep the same input size
+    :param str name: The name for the conv operation
 
     Both filters should be even length, and h should be approx linear
     phase with a quarter sample (i.e. an :math:`e^{j \pi/4}`) advance from
@@ -274,8 +276,6 @@ def coldfilt(X, ha, hb, no_decimate=False):
     # Do the 2d convolution, but only evaluated at every second sample
     # for both X_odd and X_even
     rows = r2
-    if no_decimate:
-        pass
 
     # Symmetrically extend with repeat of end samples.
     # Pad only the second dimension of the tensor X (the columns).
@@ -285,8 +285,8 @@ def coldfilt(X, ha, hb, no_decimate=False):
     X_odd = X[:, 2:r + 2 * m - 2:2, :]
     X_even = X[:, 3:r + 2 * m - 2:2, :]
 
-    a_rows = _conv_2d(X_odd, ha_t, strides=[1,2,1,1])
-    b_rows = _conv_2d(X_even, hb_t, strides=[1,2,1,1])
+    a_rows = _conv_2d(X_odd, ha_t, strides=[1,2,1,1], name=name)
+    b_rows = _conv_2d(X_even, hb_t, strides=[1,2,1,1], name=name)
 
     # Stack a_rows and b_rows (both of shape [Batch, r/4, c]) along the third
     # dimension to make a tensor of shape [Batch, r/4, 2, c].
@@ -301,14 +301,14 @@ def coldfilt(X, ha, hb, no_decimate=False):
     return Y
 
 
-def rowdfilt(X, ha, hb, no_decimate=False):
+def rowdfilt(X, ha, hb, name=None):
     """
     Filter the rows of image X using the two filters ha and hb = reverse(ha).
 
     :param X: The input, of size [batch, h, w]
     :param ha: Filter to be used on the odd samples of x.
     :param hb: Filter to bue used on the even samples of x.
-    :param no_decimate: If true, keep the same input size
+    :param str name: The name for the conv operation
 
     Both filters should be even length, and h should be approx linear
     phase with a quarter sample advance from its mid pt (i.e. :math:`|h(m/2)| >
@@ -366,11 +366,9 @@ def rowdfilt(X, ha, hb, no_decimate=False):
     # Do the 2d convolution, but only evaluated at every second sample
     # for both X_odd and X_even
     cols = c2
-    if no_decimate:
-        pass
 
-    a_cols = _conv_2d(X_odd, ha_t, strides=[1,1,2,1])
-    b_cols = _conv_2d(X_even, hb_t, strides=[1,1,2,1])
+    a_cols = _conv_2d(X_odd, ha_t, strides=[1,1,2,1], name=name)
+    b_cols = _conv_2d(X_even, hb_t, strides=[1,1,2,1], name=name)
 
     # Stack a_cols and b_cols (both of shape [Batch, r, c/4]) along the fourth
     # dimension to make a tensor of shape [Batch, r, c/4, 2].
@@ -385,7 +383,7 @@ def rowdfilt(X, ha, hb, no_decimate=False):
     return Y
 
 
-def colifilt(X, ha, hb, no_decimate=False):
+def colifilt(X, ha, hb, name=None):
     """
     Filter the columns of image X using the two filters ha and hb =
     reverse(ha).
@@ -393,7 +391,7 @@ def colifilt(X, ha, hb, no_decimate=False):
     :param X: The input, of size [batch, h, w]
     :param ha: Filter to be used on the odd samples of x.
     :param hb: Filter to bue used on the even samples of x.
-    :param no_decimate: Not implemented yet
+    :param str name: The name for the conv operation
 
     Both filters should be even length, and h should be approx linear
     phase with a quarter sample advance from its mid pt (i.e `:math:`|h(m/2)| >
@@ -475,10 +473,10 @@ def colifilt(X, ha, hb, no_decimate=False):
             lambda: (X[:, 2:r + m - 1:2, :], X[:, 1:r + m - 2:2, :]),
             lambda: (X[:, 1:r + m - 2:2, :], X[:, 2:r + m - 1:2, :]))
 
-        y1 = _conv_2d(X2, ha_odd_t)
-        y2 = _conv_2d(X1, hb_odd_t)
-        y3 = _conv_2d(X2, ha_even_t)
-        y4 = _conv_2d(X1, hb_even_t)
+        y1 = _conv_2d(X2, ha_odd_t, name=name)
+        y2 = _conv_2d(X1, hb_odd_t, name=name)
+        y3 = _conv_2d(X2, ha_even_t, name=name)
+        y4 = _conv_2d(X1, hb_even_t, name=name)
 
     # Stack 4 tensors of shape [batch, r2, c] into one tensor [batch, r2, 4, c]
     Y = tf.stack([y1,y2,y3,y4], axis=2)
