@@ -712,8 +712,6 @@ class Transform2d(object):
                     Yl = tf.expand_dims(Yl, axis=1)
                     Yl_new = Yl * lp_gain
                     Yl_new = tf.reduce_sum(Yl_new, axis=2)
-            """
-            """
 
             #  elif data_format == "nhw" or data_format == "chw":
                 #  # Each Yh has shape [c, h, w, 6]. The gain mask will have
