@@ -11,30 +11,31 @@ import tests.datasets as datasets
 from .util import skip_if_no_tf
 from scipy import stats
 from dtcwt.compat import dtwavexfm, dtwaveifm
+from dtcwt.tf.lowlevel import _HAVE_TF as HAVE_TF
 import dtcwt
 
 PRECISION_DECIMAL = 5
 TOLERANCE = 1e-6
 
 
-@skip_if_no_tf
 def setup():
-    global mandrill, in_p, pyramid_ops
-    global tf, Transform1d, dtwavexfm2, dtwaveifm2, Pyramid_tf
-    global np_dtypes, tf_dtypes, stats
-    # Import the tensorflow modules
-    tf = import_module('tensorflow')
-    dtcwt_tf = import_module('dtcwt.tf')
-    dtcwt_tf_xfm1 = import_module('dtcwt.tf.transform1d')
-    Transform1d = getattr(dtcwt_tf, 'Transform1d')
-    Pyramid_tf = getattr(dtcwt_tf, 'Pyramid')
-    np_dtypes = getattr(dtcwt_tf_xfm1, 'np_dtypes')
-    tf_dtypes = getattr(dtcwt_tf_xfm1, 'tf_dtypes')
+    if HAVE_TF:
+        global mandrill, in_p, pyramid_ops
+        global tf, Transform1d, dtwavexfm2, dtwaveifm2, Pyramid_tf
+        global np_dtypes, tf_dtypes, stats
+        # Import the tensorflow modules
+        tf = import_module('tensorflow')
+        dtcwt_tf = import_module('dtcwt.tf')
+        dtcwt_tf_xfm1 = import_module('dtcwt.tf.transform1d')
+        Transform1d = getattr(dtcwt_tf, 'Transform1d')
+        Pyramid_tf = getattr(dtcwt_tf, 'Pyramid')
+        np_dtypes = getattr(dtcwt_tf_xfm1, 'np_dtypes')
+        tf_dtypes = getattr(dtcwt_tf_xfm1, 'tf_dtypes')
 
-    mandrill = datasets.mandrill()
-    # Make sure we run tests on cpu rather than gpus
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    dtcwt.push_backend('tf')
+        mandrill = datasets.mandrill()
+        # Make sure we run tests on cpu rather than gpus
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        dtcwt.push_backend('tf')
 
 
 @skip_if_no_tf

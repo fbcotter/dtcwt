@@ -9,6 +9,7 @@ import dtcwt
 from dtcwt.numpy import Transform2d as Transform2d_np
 from dtcwt.coeffs import biort, qshift
 from dtcwt.utils import unpack
+from dtcwt.tf.lowlevel import _HAVE_TF as HAVE_TF
 from scipy import stats
 import tests.datasets as datasets
 from .util import skip_if_no_tf
@@ -17,26 +18,26 @@ import time
 PRECISION_DECIMAL = 5
 
 
-@skip_if_no_tf
 def setup():
-    # Import some tf only dependencies
-    global mandrill, Transform2d, Pyramid
-    global tf, np_dtypes, tf_dtypes, dtwavexfm2, dtwaveifm2
-    # Import the tensorflow modules
-    tf = import_module('tensorflow')
-    dtcwt.push_backend('tf')
-    Transform2d = getattr(dtcwt, 'Transform2d')
-    Pyramid = getattr(dtcwt, 'Pyramid')
-    compat = import_module('dtcwt.compat')
-    dtwavexfm2 = getattr(compat, 'dtwavexfm2')
-    dtwaveifm2 = getattr(compat, 'dtwaveifm2')
-    import dtcwt.tf.transform2d as transform2d
-    np_dtypes = getattr(transform2d, 'np_dtypes')
-    tf_dtypes = getattr(transform2d, 'tf_dtypes')
+    if HAVE_TF:
+        # Import some tf only dependencies
+        global mandrill, Transform2d, Pyramid
+        global tf, np_dtypes, tf_dtypes, dtwavexfm2, dtwaveifm2
+        # Import the tensorflow modules
+        tf = import_module('tensorflow')
+        dtcwt.push_backend('tf')
+        Transform2d = getattr(dtcwt, 'Transform2d')
+        Pyramid = getattr(dtcwt, 'Pyramid')
+        compat = import_module('dtcwt.compat')
+        dtwavexfm2 = getattr(compat, 'dtwavexfm2')
+        dtwaveifm2 = getattr(compat, 'dtwaveifm2')
+        import dtcwt.tf.transform2d as transform2d
+        np_dtypes = getattr(transform2d, 'np_dtypes')
+        tf_dtypes = getattr(transform2d, 'tf_dtypes')
 
-    mandrill = datasets.mandrill()
-    # Make sure we run tests on cpu rather than gpus
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        mandrill = datasets.mandrill()
+        # Make sure we run tests on cpu rather than gpus
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 
 @skip_if_no_tf

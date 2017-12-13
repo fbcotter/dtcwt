@@ -12,7 +12,8 @@ from dtcwt.tf import Pyramid
 from dtcwt.tf.lowlevel import complex_stack
 from dtcwt.numpy import Pyramid as Pyramid_np
 
-from dtcwt.tf.lowlevel import coldfilt, rowdfilt, rowfilter, colfilter, colifilt
+from dtcwt.tf.lowlevel import coldfilt, rowdfilt, rowfilter, colfilter
+from dtcwt.tf.lowlevel import colifilt, rowifilt
 
 _GAIN_FUNC = 'einsum'
 
@@ -1059,25 +1060,16 @@ class Transform2d(object):
                 y2bp = colifilt(hh, g2b, g2a, name='l%d_hh_col_bp' % level)
 
                 # Do even Qshift filters on rows.
-                y1T = tf.transpose(y1, perm=[0, 2, 1])
-                y2T = tf.transpose(y2, perm=[0, 2, 1])
-                y2bpT = tf.transpose(y2bp, perm=[0, 2, 1])
-                Z = tf.transpose(
-                    colifilt(y1T, g0b, g0a, name='l%d_ll_row_low' % level) +
-                    colifilt(y2T, g1b, g1a, name='l%d_hl_row_high' % level) +
-                    colifilt(y2bpT, g2b, g2a, name='l%d_hh_row_bp' % level),
-                    perm=[0, 2, 1])
+                Z = rowifilt(y1, g0b, g0a, name='l%d_ll_row_low' % level) + \
+                    rowifilt(y2, g1b, g1a, name='l%d_hl_row_high' % level) + \
+                    rowifilt(y2bp, g2b, g2a, name='l%d_hh_row_bp' % level)
             else:
                 y2 = colifilt(hl, g0b, g0a, name='l%d_hl_col_low' % level) + \
                     colifilt(hh, g1b, g1a, name='l%d_hh_col_high' % level)
 
                 # Do even Qshift filters on rows.
-                y1T = tf.transpose(y1, perm=[0, 2, 1])
-                y2T = tf.transpose(y2, perm=[0, 2, 1])
-                Z = tf.transpose(
-                    colifilt(y1T, g0b, g0a, name='l%d_ll_row_low' % level) +
-                    colifilt(y2T, g1b, g1a, name='l%d_hl_row_high' % level),
-                    perm=[0, 2, 1])
+                Z = rowifilt(y1, g0b, g0a, name='l%d_ll_row_low' % level) + \
+                    rowifilt(y2, g1b, g1a, name='l%d_hl_row_high' % level)
 
             # Check size of Z and crop as required
             Z_r, Z_c = Z.get_shape().as_list()[1:3]

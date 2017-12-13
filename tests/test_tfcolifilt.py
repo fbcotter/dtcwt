@@ -1,4 +1,5 @@
 import pytest
+import os
 from pytest import raises
 
 import numpy as np
@@ -13,6 +14,7 @@ import tests.datasets as datasets
 @skip_if_no_tf
 def test_setup():
     global mandrill, mandrill_t, tf, colifilt
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
     tf = import_module('tensorflow')
     lowlevel = import_module('dtcwt.tf.lowlevel')
     colifilt = getattr(lowlevel, 'colifilt')

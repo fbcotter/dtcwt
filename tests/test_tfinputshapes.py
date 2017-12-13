@@ -7,18 +7,18 @@ from .util import skip_if_no_tf
 from dtcwt.utils import unpack
 import dtcwt
 import dtcwt.compat
+from dtcwt.tf.lowlevel import _HAVE_TF as HAVE_TF
 
 PRECISION_DECIMAL = 5
 
 
-@skip_if_no_tf
 def setup():
-    global tf
-    tf = import_module('tensorflow')
-    dtcwt.push_backend('tf')
-
-    # Make sure we run tests on cpu rather than gpus
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    if HAVE_TF:
+        global tf
+        tf = import_module('tensorflow')
+        dtcwt.push_backend('tf')
+        # Make sure we run tests on cpu rather than gpus
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 
 @skip_if_no_tf

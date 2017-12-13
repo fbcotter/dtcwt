@@ -1,22 +1,24 @@
 from pytest import raises
 
 import numpy as np
+import os
 from importlib import import_module
 from dtcwt.coeffs import qshift
 from dtcwt.numpy.lowlevel import coldfilt as np_coldfilt
+from dtcwt.tf.lowlevel import _HAVE_TF as HAVE_TF, rowdfilt
 
 from tests.util import skip_if_no_tf
 import tests.datasets as datasets
 
 
-@skip_if_no_tf
-def test_setup():
-    global mandrill, mandrill_t, rowdfilt, tf
-    tf = import_module('tensorflow')
-    lowlevel = import_module('dtcwt.tf.lowlevel')
-    rowdfilt = getattr(lowlevel, 'rowdfilt')
-    mandrill = datasets.mandrill()
-    mandrill_t = tf.expand_dims(tf.constant(mandrill, dtype=tf.float32),axis=0)
+def setup():
+    if HAVE_TF:
+        global mandrill, mandrill_t, tf
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        tf = import_module('tensorflow')
+        mandrill = datasets.mandrill()
+        mandrill_t = tf.expand_dims(tf.constant(mandrill, dtype=tf.float32),
+                                    axis=0)
 
 
 @skip_if_no_tf

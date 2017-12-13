@@ -6,7 +6,7 @@ try:
 except ImportError:
     _HAVE_TF = False
 
-from dtcwt.utils import as_column_vector
+from dtcwt.utils import as_column_vector, asfarray
 import numpy as np
 
 
@@ -418,13 +418,13 @@ def colifilt(X, ha, hb, name=None):
     .. codeauthor:: Nick Kingsbury, Cambridge University, August 2000
     """
 
-    # A quick hack to handle undecimated inputs. Simply take every second sample
-    # as if it had been decimated.
     r, c = X.get_shape().as_list()[1:]
     if r % 2 != 0:
         raise ValueError('No. of rows in X must be a multiple of 2.\n' +
                          'X was {}'.format(X.get_shape().as_list()))
 
+    ha = asfarray(ha)
+    hb = asfarray(hb)
     ha_t = _as_col_tensor(ha)
     hb_t = _as_col_tensor(hb)
     if ha_t.shape != hb_t.shape:
@@ -449,14 +449,12 @@ def colifilt(X, ha, hb, name=None):
         # Set up vector for symmetric extension of X with repeated end samples.
 
         # Take the odd and even columns of X
-        X1, X2 = tf.cond(
-            tf.reduce_sum(ha_t * hb_t) > 0,
-            lambda: (X[:, 1:r + m - 2:2, :], X[:, 0:r + m - 3:2, :]),
-            lambda: (X[:, 0:r + m - 3:2, :], X[:, 1:r + m - 2:2, :]))
-        X3, X4 = tf.cond(
-            tf.reduce_sum(ha_t * hb_t) > 0,
-            lambda: (X[:, 3:r + m:2, :], X[:, 2:r + m - 1:2, :]),
-            lambda: (X[:, 2:r + m - 1:2, :], X[:, 3:r + m:2, :]))
+        if np.sum(ha*hb) > 0:
+            X1, X2 = X[:, 1:r+m-2:2, :], X[:, 0:r+m-3:2, :]
+            X3, X4 = X[:, 3:r+m:2, :], X[:, 2:r+m-1:2, :]
+        else:
+            X1, X2 = X[:, 0:r+m-3:2, :], X[:, 1:r+m-2:2, :]
+            X3, X4 = X[:, 2:r+m-1:2, :], X[:, 3:r+m:2, :]
 
         y1 = _conv_2d(X2, ha_even_t)
         y2 = _conv_2d(X1, hb_even_t)
@@ -468,10 +466,10 @@ def colifilt(X, ha, hb, name=None):
         # Set up vector for symmetric extension of X with repeated end samples.
 
         # Take the odd and even columns of X
-        X1, X2 = tf.cond(
-            tf.reduce_sum(ha_t * hb_t) > 0,
-            lambda: (X[:, 2:r + m - 1:2, :], X[:, 1:r + m - 2:2, :]),
-            lambda: (X[:, 1:r + m - 2:2, :], X[:, 2:r + m - 1:2, :]))
+        if np.sum(ha*hb) > 0:
+            X1, X2 = X[:, 2:r+m-1:2, :], X[:, 1:r+m-2:2, :]
+        else:
+            X1, X2 = X[:, 1:r+m-2:2, :], X[:, 2:r+m-1:2, :]
 
         y1 = _conv_2d(X2, ha_odd_t, name=name)
         y2 = _conv_2d(X1, hb_odd_t, name=name)
@@ -483,5 +481,107 @@ def colifilt(X, ha, hb, name=None):
 
     # Reshape to be [batch, r * 2, c]. This interleaves the rows
     Y = tf.reshape(Y, [-1,2*r,c])
+
+    return Y
+
+
+def rowifilt(X, ha, hb, name=None):
+    """
+    Filter the rows of image X using the two filters ha and hb =
+    reverse(ha).
+
+    :param X: The input, of size [batch, h, w]
+    :param ha: Filter to be used on the odd samples of x.
+    :param hb: Filter to bue used on the even samples of x.
+    :param str name: The name for the conv operation
+
+    Both filters should be even length, and h should be approx linear
+    phase with a quarter sample advance from its mid pt (i.e `:math:`|h(m/2)| >
+    |h(m/2 + 1)|`).
+
+    .. code-block:: text
+
+                          ext       left edge                      right edge       ext
+        Level 2:        !               |               !               |               !
+        +q filt on x      b       b       a       a       a       a       b       b
+        -q filt on o          a       a       b       b       b       b       a       a
+        Level 1:        !               |               !               |               !
+        odd filt on .    b   b   b   b   a   a   a   a   a   a   a   a   b   b   b   b
+        odd filt on .      a   a   a   a   b   b   b   b   b   b   b   b   a   a   a   a
+
+    The output is interpolated by two from the input sample rate and the
+    results from the two filters, Ya and Yb, are interleaved to give Y.
+    Symmetric extension with repeated end samples is used on the composite X
+    columns before each filter is applied.
+
+    .. codeauthor:: Fergal Cotter <fbc23@cam.ac.uk>, Feb 2017
+    .. codeauthor:: Rich Wareham <rjw57@cantab.net>, August 2013
+    .. codeauthor:: Cian Shaffrey, Cambridge University, August 2000
+    .. codeauthor:: Nick Kingsbury, Cambridge University, August 2000
+    """
+
+    r, c = X.get_shape().as_list()[1:]
+    if c % 2 != 0:
+        raise ValueError('No. of cols in X must be a multiple of 2.\n' +
+                         'X was {}'.format(X.get_shape().as_list()))
+
+    ha = asfarray(ha)
+    hb = asfarray(hb)
+    ha_t = _as_row_tensor(ha)
+    hb_t = _as_row_tensor(hb)
+    if ha_t.shape != hb_t.shape:
+        raise ValueError('Shapes of ha and hb must be the same.\n' +
+                         'ha was {}, hb was {}'.format(ha_t.shape, hb_t.shape))
+
+    m = ha_t.get_shape().as_list()[1]
+    m2 = m // 2
+    if ha_t.get_shape().as_list()[1] % 2 != 0:
+        raise ValueError('Lengths of ha and hb must be even.\n' +
+                         'ha was {}, hb was {}'.format(ha_t.shape, hb_t.shape))
+
+    X = _tf_pad(X, [[0, 0], [0, 0], [m2, m2]], 'SYMMETRIC')
+
+    ha_odd_t = ha_t[:,::2]
+    ha_even_t = ha_t[:,1::2]
+    hb_odd_t = hb_t[:,::2]
+    hb_even_t = hb_t[:,1::2]
+
+    if m2 % 2 == 0:
+        # m/2 is even, so set up t to start on d samples.
+        # Set up vector for symmetric extension of X with repeated end samples.
+
+        # Take the odd and even columns of X
+        if np.sum(ha*hb) > 0:
+            X1, X2 = X[:, :, 1:c+m-2:2], X[:, :, 0:c+m-3:2]
+            X3, X4 = X[:, :, 3:c+m:2], X[:, :, 2:c+m-1:2]
+        else:
+            X1, X2 = X[:, :, 0:c+m-3:2], X[:, :, 1:c+m-2:2]
+            X3, X4 = X[:, :, 2:c+m-1:2], X[:, :, 3:c+m:2]
+
+        y1 = _conv_2d(X2, ha_even_t)
+        y2 = _conv_2d(X1, hb_even_t)
+        y3 = _conv_2d(X4, ha_odd_t)
+        y4 = _conv_2d(X3, hb_odd_t)
+
+    else:
+        # m/2 is odd, so set up t to start on d samples.
+        # Set up vector for symmetric extension of X with repeated end samples.
+
+        # Take the odd and even columns of X
+        if np.sum(ha*hb) > 0:
+            X1, X2 = X[:, :, 2:c+m-1:2], X[:, :, 1:c+m-2:2]
+        else:
+            X1, X2 = X[:, :, 1:c+m-2:2], X[:, :, 2:c+m-1:2]
+
+        y1 = _conv_2d(X2, ha_odd_t, name=name)
+        y2 = _conv_2d(X1, hb_odd_t, name=name)
+        y3 = _conv_2d(X2, ha_even_t, name=name)
+        y4 = _conv_2d(X1, hb_even_t, name=name)
+
+    # Stack 4 tensors of shape [batch, r, c2] into one tensor [batch, r, c2, 4]
+    Y = tf.stack([y1,y2,y3,y4], axis=-1)
+
+    # Reshape to be [batch, r , c*2]. This interleaves the columns
+    Y = tf.reshape(Y, [-1,r,2*c])
 
     return Y

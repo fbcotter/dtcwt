@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from dtcwt.coeffs import biort, qshift
 from dtcwt.numpy.lowlevel import colfilter as np_colfilter
@@ -5,17 +6,17 @@ from importlib import import_module
 
 from tests.util import skip_if_no_tf
 import tests.datasets as datasets
+from dtcwt.tf.lowlevel import _HAVE_TF as HAVE_TF, colfilter
 
 
-@skip_if_no_tf
-def test_setup():
-    global mandrill, mandrill_t, tf, colfilter
-    tf = import_module('tensorflow')
-    lowlevel = import_module('dtcwt.tf.lowlevel')
-    colfilter = getattr(lowlevel, 'colfilter')
-
-    mandrill = datasets.mandrill()
-    mandrill_t = tf.expand_dims(tf.constant(mandrill, dtype=tf.float32),axis=0)
+def setup():
+    if HAVE_TF:
+        global mandrill, mandrill_t, tf
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+        tf = import_module('tensorflow')
+        mandrill = datasets.mandrill()
+        mandrill_t = tf.expand_dims(tf.constant(mandrill, dtype=tf.float32),
+                                    axis=0)
 
 
 @skip_if_no_tf
